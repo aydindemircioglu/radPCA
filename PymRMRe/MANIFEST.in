@@ -1,0 +1,10 @@
+include LICENSE
+include README.md
+
+recursive-include expt *
+recursive-include data *
+recursive-include pymrmre *
+global-include *.py
+
+exclude .gitignore
+recursive-exclude dist *
