@@ -12,25 +12,36 @@ The results are in ./results, the figures for the paper are in ./paper.
 
 To re-generate the results, first create a virtual environment, and
 install the requirements by
+
 ```pip3 install -r requirements.txt```
 
 Modify ./experiment.py to your needs, the main issue might be the number of
 parallel jobs, which is current set to 30. Change 30 in the line
-```    results = Parallel(n_jobs=30)(```
-near the end of the file. Then start it via
-```python3 ./experiment.py```
-It took nearly 2 days in my setup.
 
-*IMPORTANT*: The experiment will cache the feature reduction methods in
-./cache. ENSURE THAT YOU HAVE AT LEAST 1 TB FREE HARD DISK SPACE. I cannot
+```    results = Parallel(n_jobs=30)(```
+
+near the end of the file. Then start it via
+
+```python3 ./experiment.py```
+
+It took nearly 2 days with my setup.
+
+*IMPORTANT*: The experiment will cache the feature reduction methods,
+depending on the settings either to memory or to disk.
+You can control that with the `cache_to = "memory"` flag in the script.
+ENSURE THAT YOU HAVE AT LEAST 1 TB FREE HARD DISK SPACE. I cannot
 remember how much it took, but I think I saw at least 500 GB. But maybe that
-was when I tried SuperPCA (and failed).
+was when I tried SuperPCA (and failed). If caching to memory, then
+better have 256GB RAM, though I think even 64GB could work. The
+failed SuperPCA experiment might have distorted my view.
+
 
 Unfortunately, the timings during CV were not saved properly, so we recompute them.
 Execute ./getTimings.py for this.
 
 Then, continue to evaluate the results:
-- python3 ./evaluate.py
+
+```python3 ./evaluate.py```
 
 Note that you can evaluate without generating, since the results are
 store within this repository.
