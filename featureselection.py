@@ -1,12 +1,23 @@
 from scipy.stats import kendalltau, pearsonr
 from scipy.stats import ttest_ind
 from functools import partial
+from sklearn.ensemble import RandomForestClassifier
+import boruta
 
 import cv2
 import sys
 sys.path.append("./pymrmre")
 from pymrmre import *
 import numpy as np
+
+
+def boruta_fct (X, y):
+    rfc = RandomForestClassifier(n_jobs=1, max_depth = 5, class_weight='balanced_subsample')
+    b = boruta.BorutaPy (rfc, n_estimators = 'auto')
+    b.fit(X, y)
+    scores = np.max(b.ranking_) - b.ranking_
+    return np.array(scores)
+
 
 
 def ttest_score(X, y):

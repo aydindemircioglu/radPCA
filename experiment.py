@@ -1,12 +1,15 @@
 from sklearn.metrics import roc_auc_score
 from sklearn.feature_selection import SelectKBest, SelectFromModel, f_classif
-from sklearn.decomposition import KernelPCA, PCA, FastICA, FactorAnalysis, NMF
+from sklearn.decomposition import KernelPCA, PCA, FastICA, FactorAnalysis, NMF, TruncatedSVD
 from sklearn.naive_bayes import GaussianNB
 from sklearn.ensemble import ExtraTreesClassifier, RandomForestClassifier
+from sklearn.feature_selection import RFE
 from sklearn.linear_model import LogisticRegression
 from sklearn.svm import SVC
 from sklearn.model_selection import RepeatedStratifiedKFold
 from sklearn.preprocessing import MinMaxScaler, FunctionTransformer
+#from sklearn.feature_selection import SequentialFeatureSelector
+from sklearn.decomposition import MiniBatchDictionaryLearning
 
 import os
 import sys
@@ -40,8 +43,8 @@ selection_cache = {}
 cache_to = "memory"
 
 search_space = {
-    'fs_method': ["Bhattacharyya", "ANOVA", "LASSO", "ET", "Kendall", "MRMRe", "tTest",\
-            "UMAP", "KernelPCA", "PCA", "ICA", "FA", "NMF", "SRP", "None"],
+    'fs_method': ["Bhattacharyya", "ANOVA", "LASSO", "ET", "Kendall", "MRMRe", "tTest", "RFE_LogReg", "Boruta",\
+            "UMAP", "KernelPCA", "PCA", "ICA", "FA", "NMF", "SRP", "TruncatedSVD", "MiniBatchDict", "None"],
     'N': [2**k for k in range(0,6)],
     'clf_method': ["RBFSVM", "RandomForest", "LogisticRegression", "NaiveBayes"],
     'RF_n_estimators': [10,25,50,100,250,500,1000],
@@ -109,6 +112,14 @@ def select_features(X, y, fs_method, N):
     if fs_method == "LASSO":
         clf_fs = LogisticRegression(penalty='l1', max_iter=100, solver='liblinear', C=1, random_state=42)
         fsel = SelectFromModel(clf_fs, prefit=False, max_features=N, threshold=-np.inf)
+    elif fs_method == "RFE_LogReg":
+        clf_fs = LogisticRegression(penalty='l2', max_iter=100, solver='liblinear', C=1, random_state=42)
+        fsel = RFE(clf_fs, n_features_to_select=N, step = 0.1)
+    # elif fs_method == "SFS-LR":
+    #     clf_fs = LogisticRegression(penalty='l2', max_iter=100, solver='liblinear', C=1, random_state=42)
+    #     fsel = SequentialFeatureSelector(clf_fs, n_features_to_select=N, direction='forward', scoring='roc_auc', cv=5)
+    elif fs_method == "MiniBatchDict":
+        fsel = MiniBatchDictionaryLearning(n_components=N, random_state=42)
     elif fs_method == "ANOVA":
         fsel = SelectKBest(f_classif, k=N)
     elif fs_method == "Bhattacharyya":
@@ -122,6 +133,8 @@ def select_features(X, y, fs_method, N):
     elif fs_method == "ET":
         clf_fs = ExtraTreesClassifier(random_state=42)
         fsel = SelectFromModel(clf_fs, prefit=False, max_features=N, threshold=-np.inf)
+    elif fs_method == "Boruta":
+        fsel = SelectKBest(boruta_fct, k = N)
     elif fs_method == "UMAP":
         fsel = umap.UMAP(n_components=N, n_jobs=1, random_state=42)
     elif fs_method == "KernelPCA":
@@ -144,13 +157,15 @@ def select_features(X, y, fs_method, N):
         fsel = FactorAnalysis(n_components=N, random_state=42)
     elif fs_method == "Kendall":
         fsel = SelectKBest(score_func=kendall_score_func, k=N)
+    elif fs_method == "TruncatedSVD":
+        fsel = TruncatedSVD(n_components=N)
     elif fs_method == "None":
         fsel = FunctionTransformer(lambda X: X, validate=True)
 
-    if fs_method in ["LASSO", "ANOVA", "Pearson", "Bhattacharyya", "ET", "Kendall", "tTest", "SRP", "KSRP", "SPCA", "MRMRe", "None"]:
+    if fs_method in ["LASSO", "ANOVA", "Pearson", "Bhattacharyya", "ET", "Kendall", "tTest", "SRP", "KSRP", "SPCA", "MRMRe", "None", "RFE_LogReg", "Boruta"]:
         X_selected = fsel.fit_transform(X, y)
         return X_selected, fsel
-    elif fs_method in ["PCA", "ICA", "KernelPCA", "FA", "UMAP", "NMF", "LDA"]:
+    elif fs_method in ["PCA", "ICA", "KernelPCA", "FA", "UMAP", "NMF", "LDA", "TruncatedSVD", "MiniBatchDict"]:
         try:
             X_selected = fsel.fit_transform(X)
         except:

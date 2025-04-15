@@ -14,8 +14,8 @@ from PIL import Image, ImageChops
 
 
 # to use them properly, we define these globally
-pMethods = ["UMAP", "KernelPCA", "PCA", "ICA", "FA", "NMF", "SRP"]
-sMethods = ["Bhattacharyya", "ANOVA", "LASSO", "ET", "Kendall", "MRMRe", "tTest"]
+pMethods = ["UMAP", "KernelPCA", "PCA", "ICA", "FA", "NMF", "SRP", "TruncatedSVD", "MiniBatchDict"]
+sMethods = ["Bhattacharyya", "ANOVA", "LASSO", "ET", "Kendall", "MRMRe", "tTest", "RFE_LogReg", "Boruta"]
 nMethods = ["None"] #  to avoid error when comparing p vs s
 allMethods = pMethods.copy()
 allMethods.extend(sMethods)
@@ -29,9 +29,9 @@ def getColor (name):
         color = "blue"
     if name in sMethods:
         color = "green"
-    if name == "t-Score":
+    if name == "t-Score" or name == "RFE-LR":
         color = "green"
-    if name == "kPCA":
+    if name == "kPCA" or name == "MBDL":
         color = 'blue'
     return color
 
@@ -77,6 +77,12 @@ def getNames(mlnames):
             oz.append("t-Score")
         elif z == "KernelPCA":
             oz.append("kPCA")
+        elif z == "RFE_LogReg":
+            oz.append("RFE-LR")
+        elif z == "MiniBatchDict":
+            oz.append("MBDL")
+        # elif z == "TruncatedSVD":
+        #     oz.append("Truncated SVD")
         else:
             oz.append(z)
     return oz

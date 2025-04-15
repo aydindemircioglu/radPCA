@@ -1,8 +1,12 @@
 from scipy.stats import friedmanchisquare
 from scikit_posthocs import posthoc_nemenyi_friedman
 from scipy.stats import wilcoxon, linregress
+from sklearn.metrics import f1_score
+
+from matplotlib import gridspec
 
 import pickle
+import cv2
 from glob import glob
 
 from joblib import dump, load
@@ -10,7 +14,12 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 
+from PIL import Image
+from PIL import ImageDraw, ImageFont
+
 import matplotlib.pyplot as plt
+from matplotlib.ticker import FormatStrFormatter
+
 
 import radMLBench
 from utils import *
@@ -43,7 +52,14 @@ def readResults ():
             #auc = roc_auc_score(row["y_true"], row["y_prob"])
             row["AUC"] = df["auc"] # this is pooled
 
-            # also extract inner CV at least
+            thresholds = np.linspace(0.01, 0.99, 99)
+            #f1s = [f1_score(row["y_true"], row["y_prob"] >= t) for t in thresholds]
+            f1s = [f1_score(row["y_true"], row["y_prob"] >= t, zero_division=0) for t in thresholds]
+            best_f1 = np.max(f1s)
+            row["F1"] = best_f1
+
+
+            # also extract inner CV at least, but currently not used
             tmp = pd.DataFrame(df["fold_results"])
             row["AUC_Inner"] = tmp["auc_int"].values # this is pooled, but internally
             row["AUC_Outer"] = tmp["auc_fold"].values # this is unpooled
@@ -55,18 +71,18 @@ def readResults ():
     for z in results["FSMethod"].unique():
         for d in results["Dataset"].unique():
             subdf = results.query("FSMethod == @z and Dataset == @d")
-            assert(len(subdf) == 10)
+            assert(len(subdf) == 12)
 
     return results
 
 
-def getBestTable (results):
+def getBestTable (results, metric = "AUC"):
     bestTable = []
     for dataset in results['Dataset'].unique():
         crow = {"Dataset": dataset}
         for proj in allMethods:
             tmpdf = results.query("Dataset == @dataset and FSMethod == @proj")
-            bestP = tmpdf.sort_values(["AUC"]).iloc[-1]["AUC"]
+            bestP = tmpdf.sort_values([metric]).iloc[-1][metric]
             crow[proj] = bestP
         bestTable.append(crow)
     bestTable = pd.DataFrame(bestTable).sort_values(["Dataset"])
@@ -74,48 +90,62 @@ def getBestTable (results):
 
 
 def getRankingTable (results):
-    tableAUC = getBestTable (results)
-    tableAUC = tableAUC.drop(["Dataset"], axis = 1).T
+    rTable = {}
+    for m in ["AUC", "F1"]:
+        tableM = getBestTable (results, m)
+        tableM = tableM.drop(["Dataset"], axis = 1).T
 
-    tR = tableAUC.rank(axis = 0, ascending = False)
-    tR = tR.mean(axis = 1)
-    tR = pd.DataFrame(tR).round(1)
-    tR.columns = ["Mean rank"]
-    tR = tR.sort_values(["Mean rank"])
+        tR = tableM.rank(axis = 0, ascending = False)
+        tR = tR.mean(axis = 1)
+        tR = pd.DataFrame(tR).round(1)
+        tR.columns = [f"Mean rank ({m})"]
+        tR = tR.sort_values([f"Mean rank ({m})"])
 
-    tA = tableAUC.mean(axis=1)
-    tA = tA.loc[tR.index]
-    rTable = tR.copy()
-    rTable["Mean AUC"] = tA.round(3)
+        tA = tableM.mean(axis=1)
+        tA = tA.loc[tR.index]
+        rTable[m] = tR.copy()
+        rTable[m][f"Mean {m}"] = tA.round(3)
 
-    tM = tableAUC.mean(axis=1)
-    tM = tM.loc[tR.index]
-    tM = tM - tM["None"]
-    tM = tM.round(3)
-    rTable["Mean gain in AUC"] = tM
+        tM = tableM.mean(axis=1)
+        tM = tM.loc[tR.index]
+        tM = tM - tM["None"]
+        tM = tM.round(3)
+        rTable[m][f"Mean gain in {m}"] = tM
 
-    # how often the method performed best
-    tC = tableAUC.rank(axis = 0, ascending = False)
-    tX = tC.min(axis = 0)
-    tB = np.sum(tC == tX, axis = 1)
-    tB = tB.loc[tR.index]
-    rTable["Best-performing datasets count"] = tB
+        # how often the method performed best
+        tC = tableM.rank(axis = 0, ascending = False)
+        tX = tC.min(axis = 0)
+        tB = np.sum(tC == tX, axis = 1)
+        tB = tB.loc[tR.index]
+        rTable[m][f"Best-performing datasets count ({m})"] = tB
 
-    tX = tableAUC - tableAUC.loc["None"]
-    tX = tX.max(axis = 1)
-    tX = tX.round(3)
-    rTable["Maximum gain in AUC"] = tX
-    rTable.index = getNames(rTable.index)
+        tX = tableM - tableM.loc["None"]
+        tX = tX.max(axis = 1)
+        tX = tX.round(3)
+        rTable[m][f"Maximum gain in {m}"] = tX
+        rTable[m].index = getNames(rTable[m].index)
 
-    drawArray(rTable, aspect = 0.6, fsize = (10,7), \
-        cmap = [("-", 6.3, (6.3+10.0)/2, 10.0), \
+    #rTable["F1"] = rTable["F1"].loc[rTable["AUC"].index]
+
+    drawArray(rTable["F1"], aspect = 0.6, fsize = (10,7), \
+        cmap = [("-", 6.8, (6.8+13.3)/2, 13.3), \
+                ("+", 0.710, (0.710+0.747)/2, 0.747), \
+                ("+", -0.025, 0.0, 0.025), \
+                ("+", 0, 4, 8),
+                ("g", 0, 0.08, 0.16)],
+                fName = "FigRanking_F1", paper = True, DPI = 500)
+
+    drawArray(rTable["AUC"], aspect = 0.6, fsize = (10,7), \
+        cmap = [("-", 7.9, (7.9+12.6)/2, 12.6), \
                 ("+", 0.65, 0.68, 0.71), \
                 ("+", -0.05, 0.0, 0.05), \
-                ("+", 0, 4.5, 9),
-                ("g", 0, 0.125, 0.25)], fName = "FigRanking", paper = True, DPI = 500)
+                ("+", 0, 3.5, 7),\
+                ("g", 0, 0.125, 0.25)],
+                fName = "FigRanking_AUC", paper = True, DPI = 500)
 
-    rTable.to_csv("./paper/ranking.csv")
-    return tR.index
+    rTable["AUC"].to_csv("./paper/ranking_AUC.csv")
+    rTable["F1"].to_csv("./paper/ranking_F1.csv")
+    return rTable["AUC"].index
 
 
 
@@ -137,29 +167,34 @@ def testRanks (results, ranking):
     fMat = bestTable.copy()
     fMat.index = fMat["Dataset"]
     fMat = fMat.drop(["Dataset"], axis = 1).copy()
+    fMat.columns = getNames(fMat.columns)
     fMat = fMat[ranking]
 
     # freedman does not need pre-ranking in scipy
     print (f"Friedman test: {friedmanchisquare(*[fMat[d] for d in fMat.columns])[1]:.3f}")
     scMat = posthoc_nemenyi_friedman(fMat)
 
-    cell_widths = [0.20]*15
-    strMat = scMat.round(3)
+    cell_widths = [0.20]*scMat.shape[0]
     scMat.index = getNames(scMat.index)
     scMat.columns = getNames(scMat.columns)
-    drawArray2(scMat, strMat, fsize = (7,10), cell_widths = cell_widths, hofs = 0.45, vofs = 0.59,\
-            colmaps = [("+", 0.0001, 0.05, 1.0)]*15, ffac = 0.77, DPI = 160,
+
+    strMat = scMat.round(3)
+    drawArray2(scMat, strMat, fsize = (7,10), cell_widths = cell_widths, hofs = 0.45, vofs = 0.99,\
+            colmaps = [("+", 0.0001, 0.05, 1.0)]*scMat.shape[0], ffac = 0.77, DPI = 160,
                     fName = "FigPostHoc")
 
 
 
-def getBenefitMatrix (results):
+def getBenefitMatrix (results, ranking):
     df = getBestTable (results)
     K = df.drop(["Dataset"], axis = 1).mean()
     K = K.sort_values()
+    K.index = getNames(K.index)
+    df.columns = getNames(df.columns)
 
     comparison_matrix = pd.DataFrame(0, index=ranking, columns=ranking[::-1], dtype=float)
     gain_matrix =  pd.DataFrame(0, index=ranking, columns=ranking[::-1], dtype=float)
+
     for m in K.index:
         for n in K.index:
             if m != n:
@@ -178,12 +213,18 @@ def getBenefitMatrix (results):
     strMat = scMat.astype(str) + '\n(' + strMat + ')'
     for k in strMat.index:
         strMat.loc[k,k] = None
-    cell_widths = [0.25]*15
+    cell_widths = [0.25]*scMat.shape[0]
+
     scMat.index = getNames(scMat.index)
     scMat.columns = getNames(scMat.columns)
-    drawArray2(scMat, strMat, fsize = (7,10), cell_widths = cell_widths, hofs = 0.45, vofs = 0.59,\
-            colmaps = [("+", -25, 0, 25)]*15, ffac = 0.77, DPI = 150,
+
+    strMat.index = getNames(strMat.index)
+    strMat.columns = getNames(strMat.columns)
+
+    drawArray2(scMat, strMat, fsize = (7,10), cell_widths = cell_widths, hofs = 0.45, vofs = 0.99,\
+            colmaps = [("+", -25, 0, 25)]*scMat.shape[0], ffac = 0.77, DPI = 150,
                     fName = "FigBenefit")
+
 
 
 def getTimings():
@@ -196,12 +237,10 @@ def getTimings():
     sMethods = sorted(sMethods)
     pMethods = sorted(pMethods)
 
-    # Prepare data - now storing all individual measurements
     for method_group, methods in [("sMethods", sMethods), ("pMethods", pMethods)]:
         for method in methods:
             for N in N_values:
                 times = timings.get(method, {}).get(N, [0])
-                # Store each individual measurement
                 for time in times:
                     data.append({
                         'Method': method,
@@ -211,6 +250,7 @@ def getTimings():
                     })
 
     df = pd.DataFrame(data)
+
     sns.set(style="white")
     plt.rc('text', usetex=True)
     plt.rcParams.update({
@@ -222,76 +262,123 @@ def getTimings():
         \usepackage{helvet}
         \renewcommand{\familydefault}{\sfdefault}        '''
     fig, axes = plt.subplots(2, 1, figsize=(14, 10), dpi=400)
-    greencol = np.array([0.502, 0.729, 0.419])  # #80ba6b
+    greencol = np.array([0.502, 0.729, 0.419])
 
     palette = {
-        1: tuple(greencol * 1.3),  # Brighter
-        2: tuple(greencol * 1.2),  # Slightly brighter
-        4: tuple(greencol * 1.1),  # Original color
-        8: tuple(greencol),  # #80ba6b
+        1: tuple(greencol * 1.3),
+        2: tuple(greencol * 1.2),
+        4: tuple(greencol * 1.1),
+        8: tuple(greencol),
         16: tuple(greencol * 0.9),
         32: tuple(greencol * 0.8),
     }
 
-    # First plot (sMethods)
+
+    fig = plt.figure(figsize=(14, 12), dpi=400)
+    gs = gridspec.GridSpec(8, 1, height_ratios=[1, 0.1, 3, 0.5, 1, 0.1, 3, 0.5])  # sMethods, s-break, pMethods, p-break
+
+    # sMethods broken axis
+    ax0 = plt.subplot(gs[0])
+    ax1 = plt.subplot(gs[2], sharex=ax0)
+    plt.setp(ax0.get_xticklabels(), visible=False)
+
+    # pMethods broken axis
+    ax2 = plt.subplot(gs[4])
+    ax3 = plt.subplot(gs[6], sharex=ax2)
+    plt.setp(ax2.get_xticklabels(), visible=False)
+
+    pos_ax1 = ax1.get_position()
+    pos_ax2 = ax2.get_position()
+
+    low_ylim_S = (0, 3)
+    high_ylim_S = (62, 80)
+
+    low_ylim_P = (0, 1)
+    high_ylim_P = (1, 13)
+
+    # Plot sMethods data
     sns.barplot(
-        x='Method',
-        y='Time',
-        hue='N',
+        x='Method', y='Time', hue='N',
         data=df[df['Method_Group'] == 'sMethods'],
-        ax=axes[0],
-        dodge=True,
-        palette=palette,
-        errorbar=None
-        #errwidth=1.5,
-        #capsize=3
+        ax=ax0, dodge=True, palette=palette, errorbar=None
     )
-
-    axes[0].set_ylabel('Time (seconds)', fontsize=22, fontname='Arial')
-    axes[0].set_xticks(np.arange(len(sMethods)))
-    axes[0].set_xticklabels(getNames(sMethods), fontsize=18, fontname='Arial')
-    axes[0].legend(title="Dimension", fontsize=18, title_fontsize=20, loc="upper left",
-                  bbox_to_anchor=(0.0, 1))
-
-    # Second plot (pMethods)
     sns.barplot(
-        x='Method',
-        y='Time',
-        hue='N',
-        data=df[df['Method_Group'] == 'pMethods'],
-        ax=axes[1],
-        dodge=True,
-        palette=palette,
-        errorbar=None
-        #errwidth=1.5,
-        #capsize=3
+        x='Method', y='Time', hue='N',
+        data=df[df['Method_Group'] == 'sMethods'],
+        ax=ax1, dodge=True, palette=palette, errorbar=None
     )
 
-    axes[1].set_ylabel('Time (seconds)', fontsize=22, fontname='Arial')
-    axes[1].set_xticks(np.arange(len(pMethods)))
-    axes[1].set_xticklabels(getNames(pMethods), fontsize=18, fontname='Arial')
-    axes[1].get_legend().remove()
+    # Plot pMethods data
+    sns.barplot(
+        x='Method', y='Time', hue='N',
+        data=df[df['Method_Group'] == 'pMethods'],
+        ax=ax2, dodge=True, palette=palette, errorbar=None
+    )
+    sns.barplot(
+        x='Method', y='Time', hue='N',
+        data=df[df['Method_Group'] == 'pMethods'],
+        ax=ax3, dodge=True, palette=palette, errorbar=None
+    )
 
-    # Set consistent y-axis limits
-    ymin = 0
-    ymax = 5
-    axes[0].set_ylim(ymin, ymax)
-    axes[1].set_ylim(ymin, ymax)
+    ax0.set_ylim(high_ylim_S)
+    ax1.set_ylim(low_ylim_S)
+    ax2.set_ylim(high_ylim_P)
+    ax3.set_ylim(low_ylim_P)
 
-    # Format axes
-    axes[0].yaxis.set_major_locator(plt.MaxNLocator(integer=True))
-    axes[1].yaxis.set_major_locator(plt.MaxNLocator(integer=True))
-    axes[0].tick_params(axis='y', labelsize=18)
-    axes[1].tick_params(axis='y', labelsize=18)
-    axes[0].set_xlabel('')
-    axes[1].set_xlabel('')
+    ax1.get_legend().remove()
+    ax3.get_legend().remove()
+    ax0.get_legend().remove()
+    ax2.get_legend().remove()
 
-    for ax in axes:
+    handles, labels = ax0.get_legend_handles_labels()
+    fig.legend(handles, labels,
+               title="Dimension",
+               title_fontsize=20, fontsize=18,
+               loc="upper left",
+               fancybox=False,
+               facecolor='white',
+               bbox_to_anchor=(0.07, 0.98),
+               frameon=True)
+
+    handles, labels = ax2.get_legend_handles_labels()
+    fig.legend(handles, labels,
+               title="Dimension",
+               title_fontsize=20, fontsize=18,
+               fancybox=False,
+               facecolor='white',
+               loc="upper left",
+               bbox_to_anchor=(0.07, 0.50),
+               frameon=True)
+
+    # Break markers
+    kwargs = dict(marker=[(-1, -1), (1, 1)], markersize=12,
+                  linestyle='none', color='k', mec='k', mew=1, clip_on=False)
+
+    for ax_upper, ax_lower in [(ax0, ax1), (ax2, ax3)]:
+        ax_upper.plot([0, 1], [0, 0], transform=ax_upper.transAxes, **kwargs)
+        ax_lower.plot([0, 1], [1, 1], transform=ax_lower.transAxes, **kwargs)
+
+    for ax in [ax0, ax1, ax2, ax3]:
+        ax.tick_params(axis='y', labelsize=18)
+        ax.set_xlabel('')
         ax.set_yticklabels(ax.get_yticks(), fontname='Arial', fontsize=18)
 
-    # Adjust layout
+    ax1.set_ylabel('     Time (seconds)', fontsize=22, fontname='Arial')
+    ax3.set_ylabel('     Time (seconds)', fontsize=22, fontname='Arial')
+    ax0.set_ylabel('', fontsize=22, fontname='Arial')
+    ax2.set_ylabel('', fontsize=22, fontname='Arial')
+
+    ax1.set_xticks(np.arange(len(sMethods)))
+    ax1.set_xticklabels(getNames(sMethods), fontsize=16, fontname='Arial')
+    ax3.set_xticks(np.arange(len(pMethods)))
+    ax3.set_xticklabels(getNames(pMethods), fontsize=16, fontname='Arial')
+
+    for ax in [ax0, ax1, ax2, ax3]:
+        ax.yaxis.set_major_formatter(FormatStrFormatter('%.1f'))
+
+    # Layout
     plt.tight_layout()
-    plt.subplots_adjust(hspace=0.25)
+    plt.subplots_adjust(hspace=0.05)
     plt.savefig('./paper/FigTimings.png', bbox_inches='tight')
     plt.close()
 
@@ -364,11 +451,13 @@ def createDatasetTable():
     tbl = []
     for dataset in radMLBench.listDatasets():
         m = radMLBench.getMetaData(dataset)
+        _, y = radMLBench.loadData(dataset, return_X_y=True)
         tbl.append({"Dataset": dataset, "Modality": m["modality"], "Outcome": m["outcome"],
-            "Instances": m['nInstances'],
+            "Instances": m['nInstances'], "Positive Instances": np.sum(y == 1),
+            "Negative Instances": np.sum ( y== 0),
             "Features": m["nFeatures"], "Dimensionality": m["Dimensionality"], "Balance": m["ClassBalance"]})
-        m
     tbl = pd.DataFrame(tbl)
+    tbl
     tbl.to_excel("./paper/TableDatasets.xlsx")
 
 
@@ -475,16 +564,68 @@ def testRelations(diffs, results, DPI = 300):
 
 
 
+def addText (finalImage, text = '', org = (0,0), fontFace = '', fontSize = 12, color = (255,255,255)):
+     # Convert the image to RGB (OpenCV uses BGR)
+     #tmpImg = cv2.cvtColor(finalImage, cv2.COLOR_BGR2RGB)
+     tmpImg = finalImage
+     pil_im = Image.fromarray(tmpImg)
+     draw = ImageDraw.Draw(pil_im)
+     font = ImageFont.truetype(fontFace + ".ttf", fontSize)
+     draw.text(org, text, font=font, fill = color)
+     #tmpImg = cv2.cvtColor(np.array(pil_im), cv2.COLOR_RGB2BGR)
+     tmpImg = np.array(pil_im)
+     return (tmpImg.copy())
+
+
+
+
+def addBorder (img, pos, thickness):
+    if pos == "H":
+        img = np.hstack([255*np.ones(( img.shape[0],int(img.shape[1]*thickness), 3), dtype = np.uint8),img])
+    if pos == "V":
+        img = np.vstack([255*np.ones(( int(img.shape[0]*thickness), img.shape[1], 3), dtype = np.uint8),img])
+    return img
+
+
+
+def addBlackBorder(img, pixel):
+    return cv2.copyMakeBorder(img, pixel, pixel, pixel, pixel, cv2.BORDER_CONSTANT, value=(0, 0, 0))
+
+
+
+def joinRankingFigures():
+    fontFace = "Arial"
+
+    imA = cv2.imread("./paper/FigRanking_AUC.png")
+    imA = addText(imA, "(a)", (40, 40), fontFace, 148, color=(0, 0, 0))
+
+    imB = cv2.imread("./paper/FigRanking_F1.png")
+    imB = cv2.resize(imB, (imA.shape[1], imA.shape[0]), interpolation=cv2.INTER_LINEAR)
+    imB = addText(imB, "(b)", (40, 40), fontFace, 148, color=(0, 0, 0))
+
+    # imA = addBlackBorder(imA, 10)
+    # imB = addBlackBorder(imB, 10)
+    #imB = addText(imB, "b", (40, 40), fontFace, 112, color=(0, 0, 0))
+
+    imB = addBorder(imB, "H", 0.10)
+    imgU = np.hstack([imA, imB])
+
+    cv2.imwrite("./paper/FigRanking.png", imgU)
+
+
+
 if __name__ == '__main__':
     results = getResults()
     createDatasetTable()
 
     # just ensure we have all methods
-    assert (len(set(results["FSMethod"]) - set(allMethods)) == 0)
+    assert set(results["FSMethod"]) == set(allMethods)
 
     # main table
     ranking = getRankingTable(results)
-    getBenefitMatrix (results)
+    joinRankingFigures()
+
+    getBenefitMatrix (results, ranking)
     testRanks (results, ranking)
     diffs = getBestMethods(results)
     testRelations (diffs, results)

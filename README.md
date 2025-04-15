@@ -24,7 +24,7 @@ near the end of the file. Then start it via
 
 ```python3 ./experiment.py```
 
-It took nearly 2 days with my setup.
+It took over a week with my setup (thanks, Boruta!).
 
 *IMPORTANT*: The experiment will cache the feature reduction methods,
 depending on the settings either to memory or to disk.

@@ -17,8 +17,8 @@ os.environ["NUMEXPR_NUM_THREADS"] = "1"  # Controls NumExpr threads
 
 
 search_space = {
-    'fs_method': ["Bhattacharyya", "ANOVA", "LASSO", "ET", "Kendall", "MRMRe", "tTest",\
-            "UMAP", "KernelPCA", "PCA", "ICA", "FA", "NMF", "SRP", "None"],
+    'fs_method': ["Bhattacharyya", "ANOVA", "LASSO", "ET", "Kendall", "MRMRe", "tTest", "RFE_LogReg", "Boruta",\
+            "UMAP", "KernelPCA", "PCA", "ICA", "FA", "NMF", "SRP", "TruncatedSVD", "MiniBatchDict", "None"],
     'N': [2**k for k in range(0,6)],
 }
 
